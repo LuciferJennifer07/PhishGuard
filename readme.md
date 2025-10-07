@@ -56,7 +56,7 @@ It checks emails for suspicious words, links, and sender patterns to help identi
 
 ```bash
 
-git clone https://github.com/<username>/PhishGuard.git
+git clone https://github.com/LuciferJennifer07/PhishGuard.git
 
 cd PhishGuard
 
@@ -75,4 +75,5 @@ pip install streamlit
 
 
 streamlit run app.py
+
 
