@@ -74,6 +74,7 @@ pip install streamlit
 
 
 
-streamlit run app.py
+streamlit run phishing.py
+
 
 
