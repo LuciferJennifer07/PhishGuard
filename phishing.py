@@ -1,43 +1,18 @@
 import re
-import streamlit as st
+import urllib.parse
 
-# ---- Page Config ----
-st.set_page_config(page_title="PhishGuard - Simple Phishing Detector", layout="wide")
-
-# ---- Header ----
-st.markdown("<h1 style='text-align:center; color:#00FF00;'>🛡️ PhishGuard</h1>", unsafe_allow_html=True)
-st.markdown("<h4 style='text-align:center; color:#00FF88;'>Simple Phishing Email Detector</h4>", unsafe_allow_html=True)
-st.markdown("<h5 style='text-align:center; color:#00FF88;'>Made by Team - Error420</h5>", unsafe_allow_html=True)
-st.markdown("<h6 style='text-align:center; color:#00FF88;'>Team Members: Yuvraj Tyagi, Shivam, Palak Khandelwal, Palak Agrawal</h6>", unsafe_allow_html=True)
-st.markdown("---")
-
-# ---- Centered Input Section ----
-st.markdown("<h4 style='text-align:center; color:#FFFFFF;'>Enter Email Details</h4>", unsafe_allow_html=True)
-sender = st.text_input("Sender Email (optional)", key="sender")
-subject = st.text_input("Email Subject", key="subject")
-body = st.text_area("Email Body", height=200, key="body")
-analyze_btn = st.button("🔍 Analyze Email")
-
-# ---- Phishing Detection Function ----
 def check_phishing(subject, body, sender=""):
     text = (subject + " " + body).lower()
     score = 0
     reasons = []
 
-    # ⚠️ Expanded suspicious words (more coverage)
-    suspicious_words = [
-        "urgent", "verify", "login", "password", "bank", "account", "update", "click", "confirm",
-        "secure", "suspend", "limited", "alert", "warning", "confirm-now", "reset", "authentication",
-        "wallet", "invoice", "payment", "paypal", "amazon", "bonus", "offer", "prize", "claim",
-        "billing", "refund", "helpdesk", "support", "security", "urgent-action", "verify-now",
-        "reset-password", "transaction", "immediate", "important", "reactivate"
+    # --- Whitelist: common legit domains / brands (usefully reduces false positives) ---
+    whitelist_domains = [
+        "gmail.com", "google.com", "microsoft.com", "outlook.com", "paypal.com",
+        "amazon.com", "facebook.com", "netflix.com", "linkedin.com"
     ]
-    found_words = [w for w in suspicious_words if w in text]
-    if found_words:
-        reasons.append(f"⚠️ Found suspicious words: {', '.join(found_words)}")
-        score += len(found_words) * 10
 
-    # 🔗 Advanced phishing-prone extensions and keywords
+    # --- Suspicious TLDs (keep as before, used for combos) ---
     suspicious_exts = [
         ".xyz", ".top", ".tk", ".ga", ".cf", ".ml", ".gq", ".cn", ".ru", ".biz", ".info", ".pw",
         ".click", ".link", ".fit", ".rest", ".cam", ".live", ".buzz", ".site", ".space", ".online",
@@ -46,82 +21,112 @@ def check_phishing(subject, body, sender=""):
         ".cheap", ".discount", ".rewards", ".offers", ".coupon"
     ]
 
-    suspicious_url_keywords = [
-        "login", "signin", "secure", "verify", "account", "update", "password", "confirm", "bank",
-        "authentication", "billing", "reset", "unlock", "service", "support", "helpdesk", "webmail",
-        "outlook", "wallet", "gift", "bonus", "offer", "alert", "suspend", "limited", "urgent",
-        "verify-now", "confirm-now", "paypal", "amazon", "appleid", "microsoft", "google", "facebook"
+    # --- Keywords split into two classes ---
+    # low_weight_keywords: common words that appear in legit emails too
+    low_weight_keywords = [
+        "login", "signin", "account", "update", "password", "support", "service", "billing"
     ]
 
+    # high_weight_keywords: more suspicious or action-oriented phrases
+    high_weight_phrases = [
+        r"verify (your )?account", r"verify-now", r"confirm (your )?account", r"reset (your )?password",
+        r"click (here|the link) to", r"urgent (action )?", r"suspend(ed|ing)? account", r"reactivate (your )?account",
+        r"provide your password", r"enter your password", r"transaction (failed|notice)"
+    ]
+
+    # generic suspicious keywords that are more risky when combined with suspicious TLD or URL
+    suspicious_url_keywords = [
+        "secure", "verify", "confirm", "bank", "authentication", "billing", "reset",
+        "unlock", "webmail", "wallet", "invoice", "payment", "refund", "reimburse", "claim",
+        "gift", "bonus", "offer", "alert", "suspend", "limited", "urgent", "verify-now"
+    ]
+
+    # --- find urls ---
     urls = re.findall(r"(https?://[^\s]+|[A-Za-z0-9.-]+\.[A-Za-z]{2,})", text)
-    if urls:
-        reasons.append(f"🔗 Found links: {', '.join(urls[:3])}")
-        score += 20
-        for u in urls:
-            u_lower = u.lower()
-            # Match suspicious extension or keyword
-            if any(ext in u_lower for ext in suspicious_exts) or any(k in u_lower for k in suspicious_url_keywords):
-                reasons.append(f"🚨 Suspicious link: {u}")
-                score += 15
 
-    # 📨 Sender analysis
-    if sender and any(x in sender.lower() for x in ["no-reply", "support@", "noreply", "help@", "info@", "service@", "admin@", "care@"]):
-        reasons.append(f"📩 Sender looks generic: {sender}")
-        score += 5
+    # --- 1) high-weight phrase detection in body/subject (strong signal) ---
+    matched_high = []
+    for pat in high_weight_phrases:
+        if re.search(r"\b" + pat + r"\b", text):
+            matched_high.append(pat)
+    if matched_high:
+        reasons.append(f"⚠️ Found suspicious imperative phrases: {', '.join([p.strip('\\\\') for p in matched_high])}")
+        score += 25 * len(matched_high)  # strong penalty per phrase
 
-    score = min(score, 100)
+    # --- 2) low-weight keywords (reduce per-key score) ---
+    found_low = [w for w in low_weight_keywords if re.search(r"\b" + re.escape(w) + r"\b", text)]
+    if found_low:
+        reasons.append(f"ℹ️ Common suspicious words (low weight): {', '.join(found_low)}")
+        score += len(found_low) * 5  # only small increase
+
+    # --- 3) inspect URLs carefully (URL presence is important) ---
+    url_hits = []
+    for u in urls:
+        u_lower = u.lower()
+        # parse to extract netloc domain if possible
+        parsed = urllib.parse.urlparse(u_lower if "://" in u_lower else "http://" + u_lower)
+        domain = parsed.netloc or parsed.path  # fallback
+        domain = domain.strip("/")
+
+        # skip if domain is explicitly whitelisted (exact or contains)
+        if any(w in domain for w in whitelist_domains):
+            # record but don't penalize
+            continue
+
+        # detect suspicious tld presence
+        tld_flag = any(domain.endswith(ext) or ext in domain for ext in suspicious_exts)
+        kw_flag = any(kw in u_lower for kw in suspicious_url_keywords)
+
+        # if URL contains explicit high-risk phrase or matches a high phrase
+        if any(re.search(r"\b" + p + r"\b", u_lower) for p in ["verify", "confirm", "reset-password", "secure-login"]):
+            reasons.append(f"🚨 URL has action-oriented token: {u}")
+            score += 18
+
+        # If URL uses suspicious TLD AND keyword present -> stronger signal
+        if tld_flag and kw_flag:
+            reasons.append(f"🚨 Suspicious TLD + keyword in URL: {u}")
+            score += 25
+        elif tld_flag:
+            reasons.append(f"⚠️ Suspicious TLD in URL: {u}")
+            score += 12
+        elif kw_flag:
+            # keyword in URL but not suspicious TLD -> medium signal
+            reasons.append(f"⚠️ Suspicious keyword in URL: {u}")
+            score += 10
+
+        # URL shorteners or IP addresses detection (extra signal)
+        if re.search(r"https?://\d{1,3}(?:\.\d{1,3}){3}", u_lower):
+            reasons.append(f"⚠️ URL uses raw IP: {u}")
+            score += 18
+        if re.search(r"(bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|adf\.ly|shorturl\.at|rebrand\.ly)", u_lower):
+            reasons.append(f"⚠️ URL is shortened (might hide final destination): {u}")
+            score += 15
+
+        url_hits.append(u)
+
+    if url_hits:
+        # small baseline boost if any URLs exist (phish often include links)
+        score += 8
+        reasons.append(f"🔗 Found links: {', '.join(url_hits[:3])}")
+
+    # --- 4) sender / brand mismatch heuristic
+    if sender:
+        sender_lower = sender.lower()
+        # try to detect common brand names in email body/subject and compare sender domain
+        brands = ["paypal", "amazon", "google", "microsoft", "netflix", "bank"]
+        for b in brands:
+            if re.search(r"\b" + re.escape(b) + r"\b", text) and b not in sender_lower:
+                # if brand mentioned but sender not from that brand -> suspicious
+                reasons.append(f"⚠️ Brand '{b}' mentioned but sender not from {b}: {sender}")
+                score += 18
+                break
+
+        # generic-looking sender addresses are slightly suspicious but low weight
+        if any(x in sender_lower for x in ["no-reply", "noreply", "do-not-reply", "support@", "info@", "admin@", "service@"]):
+            reasons.append(f"ℹ️ Generic-looking sender address: {sender}")
+            score += 4
+
+    # --- 5) final caps / thresholding and caps ---
+    score = int(min(score, 100))
+
     return score, reasons
-
-# ---- Analyze Button Logic ----
-if analyze_btn:
-    if not subject and not body:
-        st.warning("Please enter email subject or body.")
-    else:
-        score, reasons = check_phishing(subject, body, sender)
-
-        # ---- Result Card ----
-        if score >= 70:
-            color = "#FF4B4B"
-            status = "⚠️ High Risk Phishing Email"
-            st.snow()  # small animation for alert
-        elif score >= 40:
-            color = "#FFA500"
-            status = "⚠️ Potential Phishing Email"
-        else:
-            color = "#32CD32"
-            status = "✅ Email looks Legitimate"
-
-        st.markdown(f"""
-            <div style='background-color:#1e1e1e; padding:20px; border-radius:10px; border-left:10px solid {color}; text-align:center;'>
-                <h3 style='color:{color}'>{status} ({score}/100)</h3>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # ---- Gradient Progress Bar ----
-        st.markdown(f"""
-        <div style='background-color:#333333; border-radius:10px; height:25px; margin-top:10px;'>
-            <div style='width:{score}%; background: linear-gradient(90deg, #00FF00, #00FFFF); height:25px; border-radius:10px;'></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ---- Reasons Section ----
-        with st.expander("🔍 Why this result?"):
-            if reasons:
-                for r in reasons:
-                    st.write(r)
-            else:
-                st.write("No suspicious elements found!")
-
-# ---- Footer ----
-st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align:center; color:#00FF00; margin-top:20px;'>
-        <strong>Made by Team - Error420</strong><br>
-        Team Members: Yuvraj Tyagi, Shivam, Palak Khandelwal, Palak Agrawal
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-st.info("🧠 *Note: Beginner-friendly prototype. Future improvements: AI-based analysis, metadata checks, advanced phishing detection.*")
