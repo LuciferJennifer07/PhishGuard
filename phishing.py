@@ -24,22 +24,48 @@ def check_phishing(subject, body, sender=""):
     score = 0
     reasons = []
 
-    suspicious_words = ["urgent", "verify", "login", "password", "bank", "account", "update", "click", "confirm"]
+    # ⚠️ Expanded suspicious words (more coverage)
+    suspicious_words = [
+        "urgent", "verify", "login", "password", "bank", "account", "update", "click", "confirm",
+        "secure", "suspend", "limited", "alert", "warning", "confirm-now", "reset", "authentication",
+        "wallet", "invoice", "payment", "paypal", "amazon", "bonus", "offer", "prize", "claim",
+        "billing", "refund", "helpdesk", "support", "security", "urgent-action", "verify-now",
+        "reset-password", "transaction", "immediate", "important", "reactivate"
+    ]
     found_words = [w for w in suspicious_words if w in text]
     if found_words:
         reasons.append(f"⚠️ Found suspicious words: {', '.join(found_words)}")
         score += len(found_words) * 10
+
+    # 🔗 Advanced phishing-prone extensions and keywords
+    suspicious_exts = [
+        ".xyz", ".top", ".tk", ".ga", ".cf", ".ml", ".gq", ".cn", ".ru", ".biz", ".info", ".pw",
+        ".click", ".link", ".fit", ".rest", ".cam", ".live", ".buzz", ".site", ".space", ".online",
+        ".store", ".support", ".cloud", ".fun", ".icu", ".tech", ".win", ".party", ".vip",
+        ".review", ".trade", ".bid", ".surf", ".wiki", ".zone", ".email", ".solutions",
+        ".cheap", ".discount", ".rewards", ".offers", ".coupon"
+    ]
+
+    suspicious_url_keywords = [
+        "login", "signin", "secure", "verify", "account", "update", "password", "confirm", "bank",
+        "authentication", "billing", "reset", "unlock", "service", "support", "helpdesk", "webmail",
+        "outlook", "wallet", "gift", "bonus", "offer", "alert", "suspend", "limited", "urgent",
+        "verify-now", "confirm-now", "paypal", "amazon", "appleid", "microsoft", "google", "facebook"
+    ]
 
     urls = re.findall(r"(https?://[^\s]+|[A-Za-z0-9.-]+\.[A-Za-z]{2,})", text)
     if urls:
         reasons.append(f"🔗 Found links: {', '.join(urls[:3])}")
         score += 20
         for u in urls:
-            if any(ext in u for ext in [".xyz", ".top", ".io", "login", "secure", "verify"]):
+            u_lower = u.lower()
+            # Match suspicious extension or keyword
+            if any(ext in u_lower for ext in suspicious_exts) or any(k in u_lower for k in suspicious_url_keywords):
                 reasons.append(f"🚨 Suspicious link: {u}")
                 score += 15
 
-    if sender and any(x in sender.lower() for x in ["no-reply", "support@", "noreply", "help@", "info@"]):
+    # 📨 Sender analysis
+    if sender and any(x in sender.lower() for x in ["no-reply", "support@", "noreply", "help@", "info@", "service@", "admin@", "care@"]):
         reasons.append(f"📩 Sender looks generic: {sender}")
         score += 5
 
@@ -57,7 +83,7 @@ if analyze_btn:
         if score >= 70:
             color = "#FF4B4B"
             status = "⚠️ High Risk Phishing Email"
-            st.balloons()  # confetti for high-risk
+            st.snow()  # small animation for alert
         elif score >= 40:
             color = "#FFA500"
             status = "⚠️ Potential Phishing Email"
