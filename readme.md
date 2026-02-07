@@ -4,8 +4,7 @@
 
 \*\*Made by Team - Error420\*\*  
 
-Team Members: Yuvraj Tyagi, Shivam, Palak Khandelwal, Palak Agrawal
-
+Team Members: Yuvraj Tyagi
 
 
 ---
@@ -75,6 +74,7 @@ pip install streamlit
 
 
 streamlit run phishing.py
+
 
 
 
